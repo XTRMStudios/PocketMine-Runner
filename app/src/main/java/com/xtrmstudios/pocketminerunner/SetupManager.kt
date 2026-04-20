@@ -35,9 +35,6 @@ object SetupManager {
         val worlds = File(server, "worlds")
         val logs = File(server, "logs")
 
-        // IMPORTANT:
-        // Android extracts packaged jniLibs into nativeLibraryDir.
-        // We run the executable from there.
         val phpPath = File(context.applicationInfo.nativeLibraryDir, "libphp.so")
 
         return Paths(
@@ -121,14 +118,19 @@ object SetupManager {
             throw IllegalStateException("Bundled PHP is not executable at ${p.phpFile.absolutePath}")
         }
 
+        val tmpDir = File(context.filesDir, "tmp")
+        if (!tmpDir.exists()) tmpDir.mkdirs()
+
         log.accept("Starting PocketMine...")
         log.accept("Working dir: ${p.serverDir.absolutePath}")
         log.accept("PHP path: ${p.phpFile.absolutePath}")
         log.accept("PHP canExecute(): ${p.phpFile.canExecute()}")
+        log.accept("Temp dir: ${tmpDir.absolutePath}")
 
         val builder = ProcessBuilder(
             p.phpFile.absolutePath,
             "-c", p.phpIni.absolutePath,
+            "-d", "sys_temp_dir=${tmpDir.absolutePath}",
             p.pharFile.absolutePath
         )
 
@@ -138,9 +140,10 @@ object SetupManager {
         val env = builder.environment()
         env["SSL_CERT_FILE"] = p.cacertPem.absolutePath
         env["LESMI_RESOLV_CONF_DIR"] = p.resolvConf.absolutePath
-
-        // Helps the binary find its sibling shared libraries
         env["LD_LIBRARY_PATH"] = context.applicationInfo.nativeLibraryDir
+        env["TMPDIR"] = tmpDir.absolutePath
+        env["TMP"] = tmpDir.absolutePath
+        env["TEMP"] = tmpDir.absolutePath
 
         return builder.start()
     }
