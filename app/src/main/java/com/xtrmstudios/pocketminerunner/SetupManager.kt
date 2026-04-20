@@ -35,7 +35,10 @@ object SetupManager {
         val worlds = File(server, "worlds")
         val logs = File(server, "logs")
 
-        val phpPath = File(context.applicationInfo.nativeLibraryDir, "php")
+        // IMPORTANT:
+        // Android extracts packaged jniLibs into nativeLibraryDir.
+        // We run the executable from there.
+        val phpPath = File(context.applicationInfo.nativeLibraryDir, "libphp.so")
 
         return Paths(
             baseDir = base,
@@ -85,7 +88,7 @@ object SetupManager {
         if (!p.phpFile.exists()) {
             throw IllegalStateException(
                 "Bundled PHP not found at ${p.phpFile.absolutePath}. " +
-                    "Make sure app/src/main/jniLibs/arm64-v8a/php exists."
+                    "Put libphp.so and the other required .so files in app/src/main/jniLibs/arm64-v8a/"
             )
         }
 
@@ -114,6 +117,10 @@ object SetupManager {
         p.phpFile.setReadable(true, false)
         p.phpFile.setExecutable(true, false)
 
+        if (!p.phpFile.canExecute()) {
+            throw IllegalStateException("Bundled PHP is not executable at ${p.phpFile.absolutePath}")
+        }
+
         log.accept("Starting PocketMine...")
         log.accept("Working dir: ${p.serverDir.absolutePath}")
         log.accept("PHP path: ${p.phpFile.absolutePath}")
@@ -132,13 +139,16 @@ object SetupManager {
         env["SSL_CERT_FILE"] = p.cacertPem.absolutePath
         env["LESMI_RESOLV_CONF_DIR"] = p.resolvConf.absolutePath
 
+        // Helps the binary find its sibling shared libraries
+        env["LD_LIBRARY_PATH"] = context.applicationInfo.nativeLibraryDir
+
         return builder.start()
     }
 
     private fun copyAssetIfMissing(context: Context, assetPath: String, outFile: File) {
         if (outFile.exists()) return
-        outFile.parentFile?.mkdirs()
 
+        outFile.parentFile?.mkdirs()
         context.assets.open(assetPath).use { input ->
             FileOutputStream(outFile).use { output ->
                 input.copyTo(output)
