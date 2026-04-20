@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to publish, e.g. v1.0.4"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -28,29 +33,32 @@ jobs:
         with:
           gradle-version: "8.2"
 
+      - name: Resolve tag name
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_TAG=${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
+          fi
+
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace --warning-mode all
 
       - name: Build release APK
         run: gradle assembleRelease --stacktrace --warning-mode all
 
-      - name: Show built APK files
-        run: |
-          echo "Debug outputs:"
-          find app/build/outputs/apk/debug -type f || true
-          echo "Release outputs:"
-          find app/build/outputs/apk/release -type f || true
-
-      - name: Rename APKs for release
+      - name: Prepare release files
         run: |
           mkdir -p release-assets
-          cp app/build/outputs/apk/debug/*.apk release-assets/PocketMine-Runner-debug-${GITHUB_REF_NAME}.apk
-          cp app/build/outputs/apk/release/*.apk release-assets/PocketMine-Runner-release-${GITHUB_REF_NAME}.apk
+          cp app/build/outputs/apk/debug/*.apk "release-assets/PocketMine-Runner-debug-${RELEASE_TAG}.apk"
+          cp app/build/outputs/apk/release/*.apk "release-assets/PocketMine-Runner-release-${RELEASE_TAG}.apk"
           ls -la release-assets
 
       - name: Publish APKs to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             release-assets/*.apk
           generate_release_notes: true
