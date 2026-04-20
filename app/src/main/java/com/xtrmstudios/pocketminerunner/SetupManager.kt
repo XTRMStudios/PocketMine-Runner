@@ -1,6 +1,7 @@
 package com.xtrmstudios.pocketminerunner
 
 import android.content.Context
+import android.net.Uri
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -29,13 +30,16 @@ object SetupManager {
 
     @JvmStatic
     fun getPaths(context: Context): Paths {
-        val base = File(context.filesDir, "pocketmine")
+        val externalBase = context.getExternalFilesDir(null)
+            ?: throw IllegalStateException("External app storage is not available.")
+
+        val base = File(externalBase, "pocketmine")
         val config = File(base, "config")
         val server = File(base, "server")
         val plugins = File(server, "plugins")
         val worlds = File(server, "worlds")
         val logs = File(server, "logs")
-        val tmp = File(context.filesDir, "tmp")
+        val tmp = File(base, "tmp")
 
         val phpPath = File(context.applicationInfo.nativeLibraryDir, "libphp.so")
 
@@ -60,13 +64,8 @@ object SetupManager {
         val p = getPaths(context)
 
         listOf(
-            p.baseDir,
-            p.configDir,
-            p.serverDir,
-            p.pluginsDir,
-            p.worldsDir,
-            p.logsDir,
-            p.tmpDir
+            p.baseDir, p.configDir, p.serverDir, p.pluginsDir,
+            p.worldsDir, p.logsDir, p.tmpDir
         ).forEach {
             if (!it.exists()) it.mkdirs()
         }
@@ -78,9 +77,6 @@ object SetupManager {
 
         log.accept("Server dir: ${p.serverDir.absolutePath}")
         log.accept("PHP path: ${p.phpFile.absolutePath}")
-        log.accept("resolv.conf: ${p.resolvConf.absolutePath}")
-        log.accept("cacert.pem: ${p.cacertPem.absolutePath}")
-        log.accept("tmp dir: ${p.tmpDir.absolutePath}")
         log.accept("Folders checked.")
         return p
     }
@@ -127,13 +123,14 @@ object SetupManager {
 
         if (!p.tmpDir.exists()) p.tmpDir.mkdirs()
 
+        val prefs = context.getSharedPreferences("pm_runner", Context.MODE_PRIVATE)
+        val resolvUriString = prefs.getString("resolv_conf_uri", null)
+
         log.accept("Starting PocketMine...")
         log.accept("Working dir: ${p.serverDir.absolutePath}")
         log.accept("PHP path: ${p.phpFile.absolutePath}")
         log.accept("PHP canExecute(): ${p.phpFile.canExecute()}")
         log.accept("Temp dir: ${p.tmpDir.absolutePath}")
-        log.accept("Using resolv.conf: ${p.resolvConf.absolutePath}")
-        log.accept("Using cacert.pem: ${p.cacertPem.absolutePath}")
 
         val builder = ProcessBuilder(
             p.phpFile.absolutePath,
@@ -147,11 +144,30 @@ object SetupManager {
 
         val env = builder.environment()
         env["SSL_CERT_FILE"] = p.cacertPem.absolutePath
-        env["LESMI_RESOLV_CONF_DIR"] = p.resolvConf.absolutePath
         env["LD_LIBRARY_PATH"] = context.applicationInfo.nativeLibraryDir
         env["TMPDIR"] = p.tmpDir.absolutePath
         env["TMP"] = p.tmpDir.absolutePath
         env["TEMP"] = p.tmpDir.absolutePath
+
+        if (resolvUriString != null) {
+            try {
+                val uri = Uri.parse(resolvUriString)
+                val copied = File(p.configDir, "resolv-user.conf")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(copied, false).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                env["LESMI_RESOLV_CONF_DIR"] = copied.absolutePath
+                log.accept("Using user resolv.conf: ${copied.absolutePath}")
+            } catch (e: Exception) {
+                env["LESMI_RESOLV_CONF_DIR"] = p.resolvConf.absolutePath
+                log.accept("Failed to use user resolv.conf, fallback to app copy: ${e.message}")
+            }
+        } else {
+            env["LESMI_RESOLV_CONF_DIR"] = p.resolvConf.absolutePath
+            log.accept("Using app resolv.conf: ${p.resolvConf.absolutePath}")
+        }
 
         return builder.start()
     }
