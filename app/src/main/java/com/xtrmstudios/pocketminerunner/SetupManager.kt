@@ -23,7 +23,8 @@ object SetupManager {
         val pharFile: File,
         val pluginsDir: File,
         val worldsDir: File,
-        val logsDir: File
+        val logsDir: File,
+        val tmpDir: File
     )
 
     @JvmStatic
@@ -34,6 +35,7 @@ object SetupManager {
         val plugins = File(server, "plugins")
         val worlds = File(server, "worlds")
         val logs = File(server, "logs")
+        val tmp = File(context.filesDir, "tmp")
 
         val phpPath = File(context.applicationInfo.nativeLibraryDir, "libphp.so")
 
@@ -48,7 +50,8 @@ object SetupManager {
             pharFile = File(server, "PocketMine-MP.phar"),
             pluginsDir = plugins,
             worldsDir = worlds,
-            logsDir = logs
+            logsDir = logs,
+            tmpDir = tmp
         )
     }
 
@@ -62,18 +65,22 @@ object SetupManager {
             p.serverDir,
             p.pluginsDir,
             p.worldsDir,
-            p.logsDir
+            p.logsDir,
+            p.tmpDir
         ).forEach {
             if (!it.exists()) it.mkdirs()
         }
 
-        copyAssetIfMissing(context, "config/resolv.conf", p.resolvConf)
-        copyAssetIfMissing(context, "config/php.ini", p.phpIni)
-        copyAssetIfMissing(context, "config/cacert.pem", p.cacertPem)
+        copyAssetOverwrite(context, "config/resolv.conf", p.resolvConf)
+        copyAssetOverwrite(context, "config/php.ini", p.phpIni)
+        copyAssetOverwrite(context, "config/cacert.pem", p.cacertPem)
         ensureServerProperties(p.serverDir)
 
         log.accept("Server dir: ${p.serverDir.absolutePath}")
         log.accept("PHP path: ${p.phpFile.absolutePath}")
+        log.accept("resolv.conf: ${p.resolvConf.absolutePath}")
+        log.accept("cacert.pem: ${p.cacertPem.absolutePath}")
+        log.accept("tmp dir: ${p.tmpDir.absolutePath}")
         log.accept("Folders checked.")
         return p
     }
@@ -85,7 +92,7 @@ object SetupManager {
         if (!p.phpFile.exists()) {
             throw IllegalStateException(
                 "Bundled PHP not found at ${p.phpFile.absolutePath}. " +
-                    "Put libphp.so and the other required .so files in app/src/main/jniLibs/arm64-v8a/"
+                    "Put libphp.so and required .so files in app/src/main/jniLibs/arm64-v8a/"
             )
         }
 
@@ -118,19 +125,20 @@ object SetupManager {
             throw IllegalStateException("Bundled PHP is not executable at ${p.phpFile.absolutePath}")
         }
 
-        val tmpDir = File(context.filesDir, "tmp")
-        if (!tmpDir.exists()) tmpDir.mkdirs()
+        if (!p.tmpDir.exists()) p.tmpDir.mkdirs()
 
         log.accept("Starting PocketMine...")
         log.accept("Working dir: ${p.serverDir.absolutePath}")
         log.accept("PHP path: ${p.phpFile.absolutePath}")
         log.accept("PHP canExecute(): ${p.phpFile.canExecute()}")
-        log.accept("Temp dir: ${tmpDir.absolutePath}")
+        log.accept("Temp dir: ${p.tmpDir.absolutePath}")
+        log.accept("Using resolv.conf: ${p.resolvConf.absolutePath}")
+        log.accept("Using cacert.pem: ${p.cacertPem.absolutePath}")
 
         val builder = ProcessBuilder(
             p.phpFile.absolutePath,
             "-c", p.phpIni.absolutePath,
-            "-d", "sys_temp_dir=${tmpDir.absolutePath}",
+            "-d", "sys_temp_dir=${p.tmpDir.absolutePath}",
             p.pharFile.absolutePath
         )
 
@@ -141,19 +149,17 @@ object SetupManager {
         env["SSL_CERT_FILE"] = p.cacertPem.absolutePath
         env["LESMI_RESOLV_CONF_DIR"] = p.resolvConf.absolutePath
         env["LD_LIBRARY_PATH"] = context.applicationInfo.nativeLibraryDir
-        env["TMPDIR"] = tmpDir.absolutePath
-        env["TMP"] = tmpDir.absolutePath
-        env["TEMP"] = tmpDir.absolutePath
+        env["TMPDIR"] = p.tmpDir.absolutePath
+        env["TMP"] = p.tmpDir.absolutePath
+        env["TEMP"] = p.tmpDir.absolutePath
 
         return builder.start()
     }
 
-    private fun copyAssetIfMissing(context: Context, assetPath: String, outFile: File) {
-        if (outFile.exists()) return
-
+    private fun copyAssetOverwrite(context: Context, assetPath: String, outFile: File) {
         outFile.parentFile?.mkdirs()
         context.assets.open(assetPath).use { input ->
-            FileOutputStream(outFile).use { output ->
+            FileOutputStream(outFile, false).use { output ->
                 input.copyTo(output)
             }
         }
